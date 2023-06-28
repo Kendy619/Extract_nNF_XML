@@ -1,103 +1,93 @@
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 import javax.swing.JFileChooser;
-import javax.swing.filechooser.FileNameExtensionFilter;
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.NodeList;
-import org.xml.sax.SAXException;
+import javax.swing.JOptionPane;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 
 public class ExtractNotaNumbersWithUI {
-    // Função para extrair o número da nota de um arquivo XML
-    private static String extrairNumeroNota(File file) {
-        String numeroNota = "";
+    public static void main(String[] args) {
+        
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Selecione a pasta contendo os XMLs");
+        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        int result = chooser.showOpenDialog(null);
 
-        try {
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            DocumentBuilder builder = factory.newDocumentBuilder();
-            Document document = builder.parse(file);
+        if (result == JFileChooser.APPROVE_OPTION) {
+            
+            String xmlFolderPath = chooser.getSelectedFile().getAbsolutePath();
 
-            Element infNFeElement = (Element) document.getElementsByTagName("infNFe").item(0);
-            Element ideElement = (Element) infNFeElement.getElementsByTagName("ide").item(0);
-            Element nNFElement = (Element) ideElement.getElementsByTagName("nNF").item(0);
-            numeroNota = nNFElement.getTextContent();
-        } catch (ParserConfigurationException | SAXException | IOException e) {
-            e.printStackTrace();
+            String csvFilePath = xmlFolderPath + File.separator + "nf_numbers.csv";
+
+            List<String> nfNumbers = extractNfNumbers(xmlFolderPath);
+
+            saveNfNumbersToCsv(nfNumbers, csvFilePath);
+
+            JOptionPane.showMessageDialog(null,
+                    "Extração concluída. Os números das notas foram salvos em: " + csvFilePath);
         }
-
-        return numeroNota;
     }
 
-    // Função para percorrer os XMLs na pasta e extrair os números das notas
-    private static String[] extrairNumerosNotas(String pastaXmls) {
-        File folder = new File(pastaXmls);
-        File[] files = folder.listFiles();
-        String[] numerosNotas = new String[files.length];
+    private static List<String> extractNfNumbers(String xmlFolderPath) {
+        List<String> nfNumbers = new ArrayList<>();
 
-        for (int i = 0; i < files.length; i++) {
-            if (files[i].isFile()) {
-                String xmlPath = files[i].getAbsolutePath();
-                numerosNotas[i] = extrairNumeroNota(new File(xmlPath));
-            }
-        }
-
-        return numerosNotas;
-    }
-
-    // Função para salvar os números das notas em um arquivo CSV
-    private static void salvarNumerosNotasCSV(String[] numerosNotas, String csvPath) {
         try {
-            FileWriter writer = new FileWriter(csvPath);
+            // Obter a lista de arquivos XML na pasta
+            List<File> xmlFiles = getXmlFiles(xmlFolderPath);
 
-            writer.append("Número da Nota");
-            writer.append("\n");
-
-            for (String numero : numerosNotas) {
-                writer.append(numero);
-                writer.append("\n");
+            // Iterar sobre cada arquivo XML
+            for (File xmlFile : xmlFiles) {
+                String nfNumber = extractNfNumberFromXml(xmlFile);
+                nfNumbers.add(nfNumber);
             }
-
-            writer.flush();
-            writer.close();
         } catch (IOException e) {
             e.printStackTrace();
         }
+
+        return nfNumbers;
     }
 
-    // Função para abrir uma janela de seleção de diretório
-    private static String escolherDiretorio() {
-        JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Selecione o diretório contendo os XMLs");
-        fileChooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+    private static List<File> getXmlFiles(String xmlFolderPath) throws IOException {
+        List<File> xmlFiles = new ArrayList<>();
 
-        int returnValue = fileChooser.showOpenDialog(null);
-        if (returnValue == JFileChooser.APPROVE_OPTION) {
-            File selectedDirectory = fileChooser.getSelectedFile();
-            return selectedDirectory.getAbsolutePath();
+        Files.walk(Paths.get(xmlFolderPath)).filter(Files::isRegularFile).filter(path -> path.toString().endsWith(".xml"))
+                .forEach(path -> xmlFiles.add(path.toFile()));
+
+        return xmlFiles;
+    }
+
+    private static String extractNfNumberFromXml(File xmlFile) throws IOException {
+        Document doc = Jsoup.parse(xmlFile, "UTF-8");
+
+        Element infNFeElement = doc.selectFirst("infNFe");
+        String nfNumber;
+
+        if (infNFeElement != null && !infNFeElement.text().isEmpty()) {
+            nfNumber = infNFeElement.selectFirst("nNF").text();
         } else {
-            return null;
+            Element chNFeElement = doc.selectFirst("chNFe");
+            String chNFe = chNFeElement.text();
+            nfNumber = chNFe.substring(29, 35);
         }
+
+        return nfNumber;
     }
 
-    // Função para executar o processo completo
-    private static void executarProcesso() {
-        String pastaXmls = escolherDiretorio();
-        if (pastaXmls != null) {
-            String csvPath = pastaXmls + File.separator + "notas.csv";
-            String[] numerosNotas = extrairNumerosNotas(pastaXmls);
-            salvarNumerosNotasCSV(numerosNotas, csvPath);
-            System.out.println("Extração concluída com sucesso!");
-        } else {
-            System.out.println("Nenhum diretório selecionado. Processo abortado.");
+    private static void saveNfNumbersToCsv(List<String> nfNumbers, String csvFilePath) {
+        try (FileWriter writer = new FileWriter(csvFilePath)) {
+            for (String nfNumber : nfNumbers) {
+                writer.write(nfNumber + "\n");
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
         }
-    }
-
-    // Exemplo de uso
-    public static void main(String[] args) {
-        executarProcesso();
     }
 }
